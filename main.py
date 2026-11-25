@@ -1,48 +1,60 @@
-"""Unified CLI entry point for running Sentinel AI backend, dashboard, or camera diagnostics."""
+"""FastAPI application entry point for Sentinel AI."""
 
-import argparse
-import subprocess
-import sys
+import logging
+from contextlib import asynccontextmanager
+from typing import Optional
 
-import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from backend.routes import health, incidents, monitoring
+from backend.services.monitoring_service import MonitoringService
 from config import settings
-from detection.camera import CameraManager
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
-def check_cameras() -> None:
-    devices = CameraManager.detect_available_cameras(settings.MAX_CAMERA_PROBE_INDEX)
-    if not devices:
-        print("No physical cameras detected.")
-        sys.exit(1)
-    for dev in devices:
-        print(f"Index {dev.index}: {dev.name} ({dev.width}x{dev.height})")
+def create_app(monitoring_service: Optional[MonitoringService] = None) -> FastAPI:
+    """Application factory for Sentinel AI backend."""
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if not hasattr(app.state, "monitoring_service") or app.state.monitoring_service is None:
+            app.state.monitoring_service = monitoring_service or MonitoringService()
+        logger.info("Sentinel AI backend started.")
+        try:
+            yield
+        finally:
+            app.state.monitoring_service.stop_monitoring()
+            logger.info("Sentinel AI backend shut down cleanly.")
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Sentinel AI Safety Monitoring Launcher")
-    parser.add_argument(
-        "command",
-        choices=["backend", "dashboard", "check-cameras"],
-        help="Component to run",
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        description="AI-Powered Real-Time Worker Safety Monitoring System REST API",
+        lifespan=lifespan,
     )
-    args = parser.parse_args()
 
-    if args.command == "check-cameras":
-        check_cameras()
-    elif args.command == "backend":
-        uvicorn.run(
-            "backend.main:app",
-            host=settings.API_HOST,
-            port=settings.API_PORT,
-            reload=False,
-        )
-    elif args.command == "dashboard":
-        subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", "dashboard/app.py"],
-            check=True,
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    if monitoring_service is not None:
+        app.state.monitoring_service = monitoring_service
+
+    app.include_router(health.router)
+    app.include_router(monitoring.router)
+    app.include_router(incidents.router)
+
+    return app
 
 
-if __name__ == "__main__":
-    main()
+app = create_app()
