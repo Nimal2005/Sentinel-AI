@@ -1,0 +1,29 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets & credentials
+.env
+secrets/
+*firebase*adminsdk*.json
+*serviceAccount*.json
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model weights & media
+models/*.pt
+models/*.onnx
+*.mp4
+*.avi
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
